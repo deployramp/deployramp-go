@@ -32,7 +32,12 @@ type flagCache struct {
 	evalMu     sync.Mutex
 	evalBatch  []EvaluationEvent
 	batchTimer *time.Timer
-	stopCh     chan struct{}
+
+	perfMu         sync.Mutex
+	perfBatch      []PerformanceEvent
+	perfBatchTimer *time.Timer
+
+	stopCh chan struct{}
 }
 
 func newFlagCache() *flagCache {
@@ -99,6 +104,43 @@ func (fc *flagCache) flushEvaluationsLocked() {
 	fc.sendMessage(wsMessage{
 		Type:        "evaluation_batch",
 		Evaluations: batch,
+	})
+}
+
+// queuePerformance adds a performance event to the batch.
+func (fc *flagCache) queuePerformance(event PerformanceEvent) {
+	fc.perfMu.Lock()
+	defer fc.perfMu.Unlock()
+
+	fc.perfBatch = append(fc.perfBatch, event)
+	if len(fc.perfBatch) >= batchMaxSize {
+		fc.flushPerformanceLocked()
+	} else if fc.perfBatchTimer == nil {
+		fc.perfBatchTimer = time.AfterFunc(batchIntervalMS*time.Millisecond, func() {
+			fc.perfMu.Lock()
+			defer fc.perfMu.Unlock()
+			fc.flushPerformanceLocked()
+		})
+	}
+}
+
+// flushPerformanceLocked sends the current performance batch over WebSocket.
+// Caller must hold perfMu.
+func (fc *flagCache) flushPerformanceLocked() {
+	if fc.perfBatchTimer != nil {
+		fc.perfBatchTimer.Stop()
+		fc.perfBatchTimer = nil
+	}
+	if len(fc.perfBatch) == 0 {
+		return
+	}
+
+	batch := fc.perfBatch
+	fc.perfBatch = nil
+
+	fc.sendMessage(wsMessage{
+		Type:              "performance_batch",
+		PerformanceEvents: batch,
 	})
 }
 
@@ -193,10 +235,14 @@ func (fc *flagCache) close() {
 	fc.closed = true
 	fc.wsMu.Unlock()
 
-	// Flush remaining evaluations
+	// Flush remaining evaluations and performance events
 	fc.evalMu.Lock()
 	fc.flushEvaluationsLocked()
 	fc.evalMu.Unlock()
+
+	fc.perfMu.Lock()
+	fc.flushPerformanceLocked()
+	fc.perfMu.Unlock()
 
 	fc.wsMu.Lock()
 	defer fc.wsMu.Unlock()

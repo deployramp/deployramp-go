@@ -43,10 +43,22 @@ type EvaluationEvent struct {
 	Timestamp int64             `json:"timestamp"`
 }
 
+// PerformanceEvent records a single performance measurement for batched reporting.
+type PerformanceEvent struct {
+	Type       string            `json:"type"` // always "performance"
+	FlagName   string            `json:"flagName"`
+	DurationMs float64           `json:"durationMs"`
+	Branch     string            `json:"branch"` // "enabled" or "disabled"
+	Traits     map[string]string `json:"traits"`
+	UserID     string            `json:"userId"`
+	Timestamp  int64             `json:"timestamp"`
+}
+
 type wsMessage struct {
-	Type        string            `json:"type"`
-	Flags       []FlagData        `json:"flags,omitempty"`
-	Evaluations []EvaluationEvent `json:"evaluations,omitempty"`
+	Type              string             `json:"type"`
+	Flags             []FlagData         `json:"flags,omitempty"`
+	Evaluations       []EvaluationEvent  `json:"evaluations,omitempty"`
+	PerformanceEvents []PerformanceEvent `json:"performanceEvents,omitempty"`
 }
 
 type fetchFlagsRequest struct {

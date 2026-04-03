@@ -239,6 +239,67 @@ func queueEvaluation(flagName string, result bool, traitOverrides ...map[string]
 	pkgCache.queueEvaluation(event)
 }
 
+// queuePerformance records a performance measurement event for batched reporting.
+func queuePerformance(flagName string, durationMs float64, branch string, traitOverrides ...map[string]string) {
+	if pkgCache == nil {
+		return
+	}
+	var overrides map[string]string
+	if len(traitOverrides) > 0 {
+		overrides = traitOverrides[0]
+	}
+	traits := mergeTraits(getCurrentTraits(), overrides)
+	event := PerformanceEvent{
+		Type:       "performance",
+		FlagName:   flagName,
+		DurationMs: durationMs,
+		Branch:     branch,
+		Traits:     traits,
+		UserID:     getUserID(),
+		Timestamp:  time.Now().UnixMilli(),
+	}
+	pkgCache.queuePerformance(event)
+}
+
+// Measure evaluates a feature flag, executes the appropriate branch,
+// measures its execution time, and reports the metric back to DeployRamp.
+func Measure(name string, enabledFn func(), disabledFn func(), traitOverrides ...map[string]string) {
+	enabled := Flag(name, traitOverrides...)
+	start := time.Now()
+	if enabled {
+		enabledFn()
+	} else {
+		disabledFn()
+	}
+	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
+	branch := "disabled"
+	if enabled {
+		branch = "enabled"
+	}
+	queuePerformance(name, durationMs, branch, traitOverrides...)
+}
+
+// MeasureValue evaluates a feature flag, executes the appropriate branch,
+// measures its execution time, and reports the metric back to DeployRamp.
+// Returns the result of the executed branch.
+func MeasureValue[T any](name string, enabledFn func() T, disabledFn func() T, traitOverrides ...map[string]string) T {
+	enabled := Flag(name, traitOverrides...)
+	start := time.Now()
+	var result T
+	if enabled {
+		result = enabledFn()
+	} else {
+		result = disabledFn()
+	}
+	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
+	branch := "disabled"
+	if enabled {
+		branch = "enabled"
+	}
+	queuePerformance(name, durationMs, branch, traitOverrides...)
+	return result
+}
+
 // Report sends an error report associated with a feature flag.
 func Report(err error, flagName string, traitOverrides ...map[string]string) {
 	if pkgClient == nil {
